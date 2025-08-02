@@ -1,43 +1,28 @@
 {
-	"name": "@alloc/quick-lru",
-	"version": "5.2.0",
-	"description": "Simple “Least Recently Used” (LRU) cache",
-	"license": "MIT",
-	"repository": "sindresorhus/quick-lru",
-	"funding": "https://github.com/sponsors/sindresorhus",
-	"author": {
-		"name": "Sindre Sorhus",
-		"email": "sindresorhus@gmail.com",
-		"url": "https://sindresorhus.com"
-	},
-	"engines": {
-		"node": ">=10"
-	},
-	"scripts": {
-		"test": "xo && nyc ava && tsd"
-	},
-	"files": [
-		"index.js",
-		"index.d.ts"
-	],
-	"keywords": [
-		"lru",
-		"quick",
-		"cache",
-		"caching",
-		"least",
-		"recently",
-		"used",
-		"fast",
-		"map",
-		"hash",
-		"buffer"
-	],
-	"devDependencies": {
-		"ava": "^2.0.0",
-		"coveralls": "^3.0.3",
-		"nyc": "^15.0.0",
-		"tsd": "^0.11.0",
-		"xo": "^0.26.0"
-	}
+  "name": "arg",
+  "version": "5.0.2",
+  "description": "Unopinionated, no-frills CLI argument parser",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "repository": "vercel/arg",
+  "author": "Josh Junon <junon@wavetilt.com>",
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "scripts": {
+    "test": "WARN_EXIT=1 jest --coverage -w 2"
+  },
+  "devDependencies": {
+    "chai": "^4.1.1",
+    "jest": "^27.0.6",
+    "prettier": "^2.3.2"
+  },
+  "prettier": {
+    "arrowParens": "always",
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "none"
+  }
 }
