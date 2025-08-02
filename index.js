@@ -1,195 +1,163 @@
-const flagSymbol = Symbol('arg flag');
+'use strict';
 
-class ArgError extends Error {
-	constructor(msg, code) {
-		super(msg);
-		this.name = 'ArgError';
-		this.code = code;
-
-		Object.setPrototypeOf(this, ArgError.prototype);
-	}
-}
-
-function arg(
-	opts,
-	{
-		argv = process.argv.slice(2),
-		permissive = false,
-		stopAtPositional = false
-	} = {}
-) {
-	if (!opts) {
-		throw new ArgError(
-			'argument specification object is required',
-			'ARG_CONFIG_NO_SPEC'
-		);
-	}
-
-	const result = { _: [] };
-
-	const aliases = {};
-	const handlers = {};
-
-	for (const key of Object.keys(opts)) {
-		if (!key) {
-			throw new ArgError(
-				'argument key cannot be an empty string',
-				'ARG_CONFIG_EMPTY_KEY'
-			);
-		}
-
-		if (key[0] !== '-') {
-			throw new ArgError(
-				`argument key must start with '-' but found: '${key}'`,
-				'ARG_CONFIG_NONOPT_KEY'
-			);
-		}
-
-		if (key.length === 1) {
-			throw new ArgError(
-				`argument key must have a name; singular '-' keys are not allowed: ${key}`,
-				'ARG_CONFIG_NONAME_KEY'
-			);
-		}
-
-		if (typeof opts[key] === 'string') {
-			aliases[key] = opts[key];
-			continue;
-		}
-
-		let type = opts[key];
-		let isFlag = false;
-
-		if (
-			Array.isArray(type) &&
-			type.length === 1 &&
-			typeof type[0] === 'function'
-		) {
-			const [fn] = type;
-			type = (value, name, prev = []) => {
-				prev.push(fn(value, name, prev[prev.length - 1]));
-				return prev;
-			};
-			isFlag = fn === Boolean || fn[flagSymbol] === true;
-		} else if (typeof type === 'function') {
-			isFlag = type === Boolean || type[flagSymbol] === true;
-		} else {
-			throw new ArgError(
-				`type missing or not a function or valid array type: ${key}`,
-				'ARG_CONFIG_VAD_TYPE'
-			);
-		}
-
-		if (key[1] !== '-' && key.length > 2) {
-			throw new ArgError(
-				`short argument keys (with a single hyphen) must have only one character: ${key}`,
-				'ARG_CONFIG_SHORTOPT_TOOLONG'
-			);
-		}
-
-		handlers[key] = [type, isFlag];
-	}
-
-	for (let i = 0, len = argv.length; i < len; i++) {
-		const wholeArg = argv[i];
-
-		if (stopAtPositional && result._.length > 0) {
-			result._ = result._.concat(argv.slice(i));
-			break;
-		}
-
-		if (wholeArg === '--') {
-			result._ = result._.concat(argv.slice(i + 1));
-			break;
-		}
-
-		if (wholeArg.length > 1 && wholeArg[0] === '-') {
-			/* eslint-disable operator-linebreak */
-			const separatedArguments =
-				wholeArg[1] === '-' || wholeArg.length === 2
-					? [wholeArg]
-					: wholeArg
-							.slice(1)
-							.split('')
-							.map((a) => `-${a}`);
-			/* eslint-enable operator-linebreak */
-
-			for (let j = 0; j < separatedArguments.length; j++) {
-				const arg = separatedArguments[j];
-				const [originalArgName, argStr] =
-					arg[1] === '-' ? arg.split(/=(.*)/, 2) : [arg, undefined];
-
-				let argName = originalArgName;
-				while (argName in aliases) {
-					argName = aliases[argName];
-				}
-
-				if (!(argName in handlers)) {
-					if (permissive) {
-						result._.push(arg);
-						continue;
-					} else {
-						throw new ArgError(
-							`unknown or unexpected option: ${originalArgName}`,
-							'ARG_UNKNOWN_OPTION'
-						);
-					}
-				}
-
-				const [type, isFlag] = handlers[argName];
-
-				if (!isFlag && j + 1 < separatedArguments.length) {
-					throw new ArgError(
-						`option requires argument (but was followed by another short argument): ${originalArgName}`,
-						'ARG_MISSING_REQUIRED_SHORTARG'
-					);
-				}
-
-				if (isFlag) {
-					result[argName] = type(true, argName, result[argName]);
-				} else if (argStr === undefined) {
-					if (
-						argv.length < i + 2 ||
-						(argv[i + 1].length > 1 &&
-							argv[i + 1][0] === '-' &&
-							!(
-								argv[i + 1].match(/^-?\d*(\.(?=\d))?\d*$/) &&
-								(type === Number ||
-									// eslint-disable-next-line no-undef
-									(typeof BigInt !== 'undefined' && type === BigInt))
-							))
-					) {
-						const extended =
-							originalArgName === argName ? '' : ` (alias for ${argName})`;
-						throw new ArgError(
-							`option requires argument: ${originalArgName}${extended}`,
-							'ARG_MISSING_REQUIRED_LONGARG'
-						);
-					}
-
-					result[argName] = type(argv[i + 1], argName, result[argName]);
-					++i;
-				} else {
-					result[argName] = type(argStr, argName, result[argName]);
-				}
-			}
-		} else {
-			result._.push(wholeArg);
-		}
-	}
-
-	return result;
-}
-
-arg.flag = (fn) => {
-	fn[flagSymbol] = true;
-	return fn;
+const wrapAnsi16 = (fn, offset) => (...args) => {
+	const code = fn(...args);
+	return `\u001B[${code + offset}m`;
 };
 
-// Utility types
-arg.COUNT = arg.flag((v, name, existingCount) => (existingCount || 0) + 1);
+const wrapAnsi256 = (fn, offset) => (...args) => {
+	const code = fn(...args);
+	return `\u001B[${38 + offset};5;${code}m`;
+};
 
-// Expose error class
-arg.ArgError = ArgError;
+const wrapAnsi16m = (fn, offset) => (...args) => {
+	const rgb = fn(...args);
+	return `\u001B[${38 + offset};2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
+};
 
-module.exports = arg;
+const ansi2ansi = n => n;
+const rgb2rgb = (r, g, b) => [r, g, b];
+
+const setLazyProperty = (object, property, get) => {
+	Object.defineProperty(object, property, {
+		get: () => {
+			const value = get();
+
+			Object.defineProperty(object, property, {
+				value,
+				enumerable: true,
+				configurable: true
+			});
+
+			return value;
+		},
+		enumerable: true,
+		configurable: true
+	});
+};
+
+/** @type {typeof import('color-convert')} */
+let colorConvert;
+const makeDynamicStyles = (wrap, targetSpace, identity, isBackground) => {
+	if (colorConvert === undefined) {
+		colorConvert = require('color-convert');
+	}
+
+	const offset = isBackground ? 10 : 0;
+	const styles = {};
+
+	for (const [sourceSpace, suite] of Object.entries(colorConvert)) {
+		const name = sourceSpace === 'ansi16' ? 'ansi' : sourceSpace;
+		if (sourceSpace === targetSpace) {
+			styles[name] = wrap(identity, offset);
+		} else if (typeof suite === 'object') {
+			styles[name] = wrap(suite[targetSpace], offset);
+		}
+	}
+
+	return styles;
+};
+
+function assembleStyles() {
+	const codes = new Map();
+	const styles = {
+		modifier: {
+			reset: [0, 0],
+			// 21 isn't widely supported and 22 does the same thing
+			bold: [1, 22],
+			dim: [2, 22],
+			italic: [3, 23],
+			underline: [4, 24],
+			inverse: [7, 27],
+			hidden: [8, 28],
+			strikethrough: [9, 29]
+		},
+		color: {
+			black: [30, 39],
+			red: [31, 39],
+			green: [32, 39],
+			yellow: [33, 39],
+			blue: [34, 39],
+			magenta: [35, 39],
+			cyan: [36, 39],
+			white: [37, 39],
+
+			// Bright color
+			blackBright: [90, 39],
+			redBright: [91, 39],
+			greenBright: [92, 39],
+			yellowBright: [93, 39],
+			blueBright: [94, 39],
+			magentaBright: [95, 39],
+			cyanBright: [96, 39],
+			whiteBright: [97, 39]
+		},
+		bgColor: {
+			bgBlack: [40, 49],
+			bgRed: [41, 49],
+			bgGreen: [42, 49],
+			bgYellow: [43, 49],
+			bgBlue: [44, 49],
+			bgMagenta: [45, 49],
+			bgCyan: [46, 49],
+			bgWhite: [47, 49],
+
+			// Bright color
+			bgBlackBright: [100, 49],
+			bgRedBright: [101, 49],
+			bgGreenBright: [102, 49],
+			bgYellowBright: [103, 49],
+			bgBlueBright: [104, 49],
+			bgMagentaBright: [105, 49],
+			bgCyanBright: [106, 49],
+			bgWhiteBright: [107, 49]
+		}
+	};
+
+	// Alias bright black as gray (and grey)
+	styles.color.gray = styles.color.blackBright;
+	styles.bgColor.bgGray = styles.bgColor.bgBlackBright;
+	styles.color.grey = styles.color.blackBright;
+	styles.bgColor.bgGrey = styles.bgColor.bgBlackBright;
+
+	for (const [groupName, group] of Object.entries(styles)) {
+		for (const [styleName, style] of Object.entries(group)) {
+			styles[styleName] = {
+				open: `\u001B[${style[0]}m`,
+				close: `\u001B[${style[1]}m`
+			};
+
+			group[styleName] = styles[styleName];
+
+			codes.set(style[0], style[1]);
+		}
+
+		Object.defineProperty(styles, groupName, {
+			value: group,
+			enumerable: false
+		});
+	}
+
+	Object.defineProperty(styles, 'codes', {
+		value: codes,
+		enumerable: false
+	});
+
+	styles.color.close = '\u001B[39m';
+	styles.bgColor.close = '\u001B[49m';
+
+	setLazyProperty(styles.color, 'ansi', () => makeDynamicStyles(wrapAnsi16, 'ansi16', ansi2ansi, false));
+	setLazyProperty(styles.color, 'ansi256', () => makeDynamicStyles(wrapAnsi256, 'ansi256', ansi2ansi, false));
+	setLazyProperty(styles.color, 'ansi16m', () => makeDynamicStyles(wrapAnsi16m, 'rgb', rgb2rgb, false));
+	setLazyProperty(styles.bgColor, 'ansi', () => makeDynamicStyles(wrapAnsi16, 'ansi16', ansi2ansi, true));
+	setLazyProperty(styles.bgColor, 'ansi256', () => makeDynamicStyles(wrapAnsi256, 'ansi256', ansi2ansi, true));
+	setLazyProperty(styles.bgColor, 'ansi16m', () => makeDynamicStyles(wrapAnsi16m, 'rgb', rgb2rgb, true));
+
+	return styles;
+}
+
+// Make the export immutable
+Object.defineProperty(module, 'exports', {
+	enumerable: true,
+	get: assembleStyles
+});
